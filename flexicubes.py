@@ -48,7 +48,7 @@ class FlexiCubes:
         self.adj_pairs = torch.tensor([0, 1, 1, 3, 3, 2, 2, 0], dtype=torch.long, device=device)
 
     def __call__(self, voxelgrid_vertices, scalar_field, cube_idx, resolution, qef_reg_scale=1e-3,
-                 weight_scale=0.99, beta=None, alpha=None, gamma_f=None, voxelgrid_colors=None, training=False):
+                 weight_scale=0.99, beta=None, alpha=None, gamma_f=None, voxelgrid_colors=None, training=False, surf=None, no_other=False):
         assert torch.is_tensor(voxelgrid_vertices) and \
             check_tensor(voxelgrid_vertices, (None, 3), throw=False), \
             "'voxelgrid_vertices' should be a tensor of shape (num_vertices, 3)"
@@ -73,7 +73,9 @@ class FlexiCubes:
             check_tensor(gamma_f, (num_cubes,), throw=False)
         ), "'gamma_f' should be a tensor of shape (num_cubes,)"
 
-        surf_cubes, occ_fx8 = self._identify_surf_cubes(scalar_field, cube_idx)
+        surf_cubes, occ_fx8 = self._identify_surf_cubes(scalar_field, cube_idx, no_other=no_other)
+        if surf is not None:
+            surf_cubes &= surf
         if surf_cubes.sum() == 0:
             return (
                 torch.zeros((0, 3), device=self.device),
@@ -203,7 +205,7 @@ class FlexiCubes:
         return surf_edges, idx_map, counts, surf_edges_mask
 
     @torch.no_grad()
-    def _identify_surf_cubes(self, scalar_field, cube_idx):
+    def _identify_surf_cubes(self, scalar_field, cube_idx, no_other):
         """
         Identifies grid cubes that intersect with the underlying surface by checking if the signs at 
         all corners are not identical.
@@ -212,6 +214,13 @@ class FlexiCubes:
         occ_fx8 = occ_n[cube_idx.reshape(-1)].reshape(-1, 8)
         _occ_sum = torch.sum(occ_fx8, -1)
         surf_cubes = (_occ_sum > 0) & (_occ_sum < 8)
+        # print(surf_cubes.shape)
+        # exit()
+        if no_other:
+            wzj_n = scalar_field > -99.9999
+            occ_wzj_n = wzj_n[cube_idx.reshape(-1)].reshape(-1, 8)
+            _occ_sum_wzj = occ_wzj_n.all(dim=-1)
+            surf_cubes &= _occ_sum_wzj
         return surf_cubes, occ_fx8
 
     def _linear_interp(self, edges_weight, edges_x):
