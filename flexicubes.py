@@ -48,7 +48,7 @@ class FlexiCubes:
         self.adj_pairs = torch.tensor([0, 1, 1, 3, 3, 2, 2, 0], dtype=torch.long, device=device)
 
     def __call__(self, voxelgrid_vertices, scalar_field, cube_idx, resolution, qef_reg_scale=1e-3,
-                 weight_scale=0.99, beta=None, alpha=None, gamma_f=None, voxelgrid_colors=None, training=False, surf=None, no_other=False):
+                 weight_scale=0.99, beta=None, alpha=None, gamma_f=None, voxelgrid_colors=None, training=False, surf=None, no_other=False, marching_mask=None):
         assert torch.is_tensor(voxelgrid_vertices) and \
             check_tensor(voxelgrid_vertices, (None, 3), throw=False), \
             "'voxelgrid_vertices' should be a tensor of shape (num_vertices, 3)"
@@ -73,7 +73,7 @@ class FlexiCubes:
             check_tensor(gamma_f, (num_cubes,), throw=False)
         ), "'gamma_f' should be a tensor of shape (num_cubes,)"
 
-        surf_cubes, occ_fx8 = self._identify_surf_cubes(scalar_field, cube_idx, no_other=no_other)
+        surf_cubes, occ_fx8 = self._identify_surf_cubes(scalar_field, cube_idx, no_other=no_other, marching_mask=marching_mask)
         if surf is not None:
             surf_cubes &= surf
         if surf_cubes.sum() == 0:
@@ -205,15 +205,20 @@ class FlexiCubes:
         return surf_edges, idx_map, counts, surf_edges_mask
 
     @torch.no_grad()
-    def _identify_surf_cubes(self, scalar_field, cube_idx, no_other):
+    def _identify_surf_cubes(self, scalar_field, cube_idx, no_other, marching_mask=None):
         """
         Identifies grid cubes that intersect with the underlying surface by checking if the signs at 
         all corners are not identical.
         """
+        # print(marching_mask is None)
         occ_n = scalar_field < 0
         occ_fx8 = occ_n[cube_idx.reshape(-1)].reshape(-1, 8)
         _occ_sum = torch.sum(occ_fx8, -1)
         surf_cubes = (_occ_sum > 0) & (_occ_sum < 8)
+        if marching_mask is not None:
+            true_indices = torch.where(surf_cubes)[0]
+            indices_to_change = true_indices[marching_mask] 
+            surf_cubes[indices_to_change] = False
         # print(surf_cubes.shape)
         # exit()
         if no_other:
